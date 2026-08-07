@@ -1,0 +1,24 @@
+*
+
+# ディレクトリ探索は許可する。中身は下の例外だけ Git 管理対象にする。
+!*/
+
+# 生成物・ローカル環境
+.DS_Store
+.venv/
+venv/
+env/
+__pycache__/
+results/
+
+# プログラムファイル
+!*.py
+
+# README
+!README.md
+
+# 依存関係
+!requirements.txt
+
+# この ignore ルール自体は Git に上げる。
+!.gitignore
