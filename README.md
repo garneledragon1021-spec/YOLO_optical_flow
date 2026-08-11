@@ -66,6 +66,7 @@ CPUで実行する場合:
 | `--imgsz` | `640` | YOLO推論画像サイズ |
 | `--detect-every` | `15` | YOLO Poseを再実行する間隔（フレーム） |
 | `--crop-size` | `160` | オプティカルフロー追跡範囲の大きさ（px） |
+| `--trail-length` | `90` | 画面に表示する直近軌道の点数 |
 | `--device` | 自動 | `cpu`、`0`などの推論デバイス |
 | `--csv` | なし | `frame,x,y,source`形式のCSV出力先 |
 
@@ -77,6 +78,7 @@ CPUで実行する場合:
   --model yolo11n-pose.pt `
   --side right `
   --detect-every 10 `
+  --trail-length 120 `
   --confidence 0.4 `
   --csv results\right_ankle.csv
 ```
@@ -85,12 +87,12 @@ CPUで実行する場合:
 
 ## その他のスクリプト
 
-`toe_mp.py`、`toe_flow.py`、`foot_flow.py` などは、元のMediaPipe版の処理を含む既存スクリプトです。YOLO Pose版として現在置き換え済みなのは `toe_live.py` です。
+`toe_mp.py`、`foot_flow.py` などには元のMediaPipe版の処理が残っています。`toe_live.py` と `toe_flow.py` はYOLO Pose版へ置き換え済みです。
 
 | ファイル | 概要 |
 | --- | --- |
 | `toe_live.py` | YOLO Poseとオプティカルフローによるリアルタイム足首追跡 |
-| `toe_flow.py` | MediaPipe Poseとオプティカルフローによる動画追跡 |
+| `toe_flow.py` | YOLO Poseとオプティカルフローによる動画追跡。CSVと任意の注釈付きMP4を出力 |
 | `toe_mp.py` | MediaPipe Poseによるキーポイント検出 |
 | `trajectory_angle.py` | 座標CSVから軌跡角度・角速度を計算 |
 | `overlay_video.py` | 座標CSVを動画へ重ねてMP4を作成 |

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 #toe_flow.py
-"""OpenPose 風のキーポイントフローで動画を処理する。
+"""YOLO Poseとオプティカルフローで動画を処理する。
 
-MediaPipe Pose は指定間隔でつま先位置を更新する時だけ使う。
+YOLO Pose は指定間隔で足首位置を更新する時だけ使う。
 更新の間は、つま先周辺の小さいクロップ内で Lucas-Kanade optical flow
 により点を追跡する。
 """
@@ -16,110 +16,40 @@ import sys
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks.python import vision
 from scipy.signal import savgol_filter
-from mediapipe_helper import create_pose_landmarker, ensure_pose_model_file
-from video_io import make_video_writer, video_timestamp_ms
+from ultralytics import YOLO
+from video_io import make_video_writer
 
 RESULTS_DIR = Path("results")
 
 TOE_LANDMARKS = {
-    "left": 31,
-    "right": 32,
+    "left": 15,   # left ankle (COCO pose index)
+    "right": 16,  # right ankle (COCO pose index)
 }
-
-POSE_SEGMENT_LANDMARKS = {
-    "left": (25, 27, 31),   # knee, ankle, toe
-    "right": (26, 28, 32),
-}
-
 
 def detect_toe(
-    landmarker: vision.PoseLandmarker, # type: ignore
+    model: YOLO,
     frame: np.ndarray,
-    timestamp_ms: int,
     landmark_index: int,
-    pose_scale: float,
+    confidence: float,
+    imgsz: int,
+    device: str | int | None = None,
 ) -> tuple[float, float] | None:
-    """Pose 推定を行い、信頼度を満たすつま先の元画像座標を返す。"""
-    # Pose は更新フレームだけ実行する。返ってくる正規化座標は、
-    # 元動画の座標系に戻して返す。
-    height, width = frame.shape[:2]
-    if pose_scale != 1.0:
-        pose_frame = cv2.resize(frame, None, fx=pose_scale, fy=pose_scale, interpolation=cv2.INTER_AREA)
-    else:
-        pose_frame = frame
-
-    frame_rgba = cv2.cvtColor(pose_frame, cv2.COLOR_BGR2RGBA)
-    mp_image = mp.Image(
-        image_format=mp.ImageFormat.SRGBA,
-        data=np.ascontiguousarray(frame_rgba),
-    )
-    result = landmarker.detect_for_video(mp_image, timestamp_ms)
-    if not result.pose_landmarks:
+    """YOLO Poseから左右の足首キーポイントを取得する。"""
+    results = model.predict(source=frame, conf=confidence, imgsz=imgsz, device=device, verbose=False)
+    if not results or results[0].keypoints is None or len(results[0].keypoints) == 0:
         return None
-
-    landmark = result.pose_landmarks[0][landmark_index]
-    if landmark.visibility is not None and landmark.visibility < 0.35:
+    keypoints = results[0].keypoints
+    xy = keypoints.xy.cpu().numpy()
+    conf = keypoints.conf
+    conf_np = conf.cpu().numpy() if conf is not None else np.ones(xy.shape[:2])
+    valid = conf_np[:, landmark_index] >= confidence
+    if not np.any(valid):
         return None
-    return landmark.x * width, landmark.y * height
-
-
-def detect_pose_leg_points(
-    landmarker: vision.PoseLandmarker, # type: ignore
-    frame: np.ndarray,
-    timestamp_ms: int,
-    side: str,
-    pose_scale: float,
-) -> dict[str, tuple[float, float]] | None:
-    """膝・足首・つま先を取得し、骨格整合性チェック用に返す。"""
-    height, width = frame.shape[:2]
-    pose_frame = (
-        cv2.resize(frame, None, fx=pose_scale, fy=pose_scale, interpolation=cv2.INTER_AREA)
-        if pose_scale != 1.0 else frame
-    )
-    frame_rgba = cv2.cvtColor(pose_frame, cv2.COLOR_BGR2RGBA)
-    mp_image = mp.Image(
-        image_format=mp.ImageFormat.SRGBA,
-        data=np.ascontiguousarray(frame_rgba),
-    )
-    result = landmarker.detect_for_video(mp_image, timestamp_ms)
-    if not result.pose_landmarks:
-        return None
-
-    names = ("knee", "ankle", "toe")
-    indices = POSE_SEGMENT_LANDMARKS[side]
-    points: dict[str, tuple[float, float]] = {}
-    for name, index in zip(names, indices):
-        landmark = result.pose_landmarks[0][index]
-        if landmark.visibility is not None and landmark.visibility < 0.35:
-            return None
-        points[name] = (landmark.x * width, landmark.y * height)
-    return points
-
-
-def leg_geometry_is_valid(
-    points: dict[str, tuple[float, float]],
-    previous: tuple[float, float, float] | None,
-    tolerance: float = 0.30,
-) -> tuple[bool, tuple[float, float, float]]:
-    """膝-足首、足首-つま先の長さの急変を検出する。"""
-    knee = np.asarray(points["knee"], dtype=np.float64)
-    ankle = np.asarray(points["ankle"], dtype=np.float64)
-    toe = np.asarray(points["toe"], dtype=np.float64)
-    lengths = (
-        float(np.linalg.norm(knee - ankle)),
-        float(np.linalg.norm(ankle - toe)),
-        float(np.linalg.norm(knee - toe)),
-    )
-    if min(lengths) < 8.0:
-        return False, lengths
-    if previous is None:
-        return True, lengths
-    ratios = [current / old for current, old in zip(lengths, previous) if old > 1e-6]
-    return all((1.0 - tolerance) <= ratio <= (1.0 + tolerance) for ratio in ratios), lengths
+    person_index = int(np.argmax(np.where(valid, conf_np[:, landmark_index], -1.0)))
+    x, y = xy[person_index, landmark_index]
+    return float(x), float(y)
 
 
 def crop_bounds(point: tuple[float, float], width: int, height: int, crop_size: int) -> tuple[int, int, int, int]:
@@ -407,7 +337,7 @@ def write_results_csv(
             ])
 
 
-def process_video(args: argparse.Namespace, video_path: str, landmarker, delegate: str) -> None:
+def process_video(args: argparse.Namespace, video_path: str, model: YOLO, delegate: str) -> None:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"cannot open: {video_path}")
@@ -422,7 +352,6 @@ def process_video(args: argparse.Namespace, video_path: str, landmarker, delegat
     source = "none"
     frame_idx = 0
     rows = []
-    previous_leg_geometry = None
 
     print(f"Processing: {video_path}")
     print(f"  csv: {csv_path}")
@@ -436,15 +365,13 @@ def process_video(args: argparse.Namespace, video_path: str, landmarker, delegat
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        timestamp_ms = video_timestamp_ms(cap, frame_idx)
-        # 追跡点がない場合、または指定間隔に達した場合は MediaPipe で再検出する。
+        # 追跡点がない場合、または指定間隔に達した場合はYOLOで再検出する。
         # それ以外の中間フレームは optical flow で追跡する。
         needs_pose = point is None or frame_idx % args.detect_every == 0
 
         pose_point = None
         flow_point = None
         periodic_point = None
-        leg_points = None
 
         if not needs_pose and prev_gray is not None:
             tracked = track_toe_single(prev_gray, gray, point, args.crop_size) # type: ignore
@@ -457,33 +384,20 @@ def process_video(args: argparse.Namespace, video_path: str, landmarker, delegat
                 needs_pose = True
 
         if needs_pose:
-            leg_points = detect_pose_leg_points(
-                landmarker,
+            detected = detect_toe(
+                model,
                 frame,
-                timestamp_ms,
-                args.side,
-                args.pose_scale,
+                landmark_index,
+                args.confidence,
+                args.imgsz,
+                args.device,
             )
-            if leg_points is not None:
-                geometry_valid, current_geometry = leg_geometry_is_valid(
-                    leg_points,
-                    previous_leg_geometry,
-                )
-            else:
-                geometry_valid = False
-                current_geometry = None
-
-            if leg_points is not None and geometry_valid:
-                previous_leg_geometry = current_geometry
-                detected = leg_points["toe"]
+            if detected is not None:
                 pose_point = detected
                 point = detected
                 source = "pose"
             else:
-                # 脚形状が不自然なPose更新は捨てるが、直前の点は保持する。
-                # pointをNoneにすると、以後の全フレームがPose再試行になり、
-                # 一度の誤検出で動画末尾まで欠損するため。
-                source = "pose_geometry_rejected" if leg_points is not None else "none"
+                source = "none"
                 if point is None:
                     source = "none"
 
@@ -519,18 +433,20 @@ def process_video(args: argparse.Namespace, video_path: str, landmarker, delegat
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Process videos with toe keypoint flow")
-    parser.add_argument("--check", action="store_true", help="initialize MediaPipe Tasks and exit")
+    parser = argparse.ArgumentParser(description="Process videos with YOLO Pose and optical flow")
     parser.add_argument(
         "--video",
         action="append",
         help="video file path to process. Repeat for multiple files. If omitted, a file picker opens.",
     )
     parser.add_argument("--side", choices=sorted(TOE_LANDMARKS), default="left", help="toe landmark to track")
-    parser.add_argument("--cpu", action="store_true", help="kept for compatibility; CPU is always used")
-    parser.add_argument("--detect-every", type=int, default=15, help="run pose detection every N frames")
+    parser.add_argument("--cpu", action="store_true", help="use CPU inference")
+    parser.add_argument("--device", default=None, help="YOLO device, e.g. cpu or 0")
+    parser.add_argument("--model", default="yolo11n-pose.pt", help="YOLO Pose model name or path")
+    parser.add_argument("--confidence", type=float, default=0.35, help="keypoint confidence threshold")
+    parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size")
+    parser.add_argument("--detect-every", type=int, default=15, help="run YOLO Pose every N frames")
     parser.add_argument("--crop-size", type=int, default=160, help="optical-flow crop size around the toe")
-    parser.add_argument("--pose-scale", type=float, default=0.5, help="downscale factor for pose refresh")
     parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR, help="output directory")
     parser.add_argument("--write-video", action="store_true", help="write an annotated MP4 alongside the CSV")
     parser.add_argument("--progress-every", type=int, default=30, help="print progress every N frames")
@@ -542,8 +458,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--detect-every must be >= 1")
     if args.crop_size < 32:
         parser.error("--crop-size must be >= 32")
-    if not (0.1 <= args.pose_scale <= 1.0):
-        parser.error("--pose-scale must be between 0.1 and 1.0")
+    if not (0.0 < args.confidence <= 1.0):
+        parser.error("--confidence must be between 0 and 1")
+    if args.imgsz < 32:
+        parser.error("--imgsz must be >= 32")
+    if args.cpu:
+        args.device = "cpu"
     if args.progress_every < 1:
         parser.error("--progress-every must be >= 1")
     if args.savgol_window < 3 or args.savgol_window % 2 == 0:
@@ -560,24 +480,17 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.check:
-        landmarker, delegate = create_pose_landmarker()
-        with landmarker:
-            print(f"delegate: {delegate}")
-            print(f"model: {ensure_pose_model_file()}")
-            print("flow_video MediaPipe Tasks initialization: OK")
-        return 0
-
     videos = args.video if args.video else select_videos()
     if not videos:
         print("No files selected. 終了します。")
         return 0
 
-    landmarker, delegate = create_pose_landmarker()
-    with landmarker:
-        print(f"delegate: {delegate}")
-        for video_path in videos:
-            process_video(args, video_path, landmarker, delegate)
+    model = YOLO(args.model)
+    delegate = f"YOLO ({args.device})"
+    print(f"delegate: {delegate}")
+    print(f"model: {args.model}")
+    for video_path in videos:
+        process_video(args, video_path, model, delegate)
     return 0
 
 

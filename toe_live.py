@@ -13,6 +13,7 @@ import argparse
 import csv
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 try:
@@ -128,10 +129,18 @@ def timestamp_for_frame(cap: cv2.VideoCapture, frame_idx: int, start_time: float
 def draw_overlay(
     frame: np.ndarray,
     point: tuple[float, float] | None,
+    trail: list[tuple[float, float]],
     crop_size: int,
     delegate: str,
     source: str,
 ) -> None:
+    if len(trail) >= 2:
+        points = np.asarray(trail, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(frame, [points], isClosed=False, color=(0, 200, 255), thickness=3)
+        for index, (x, y) in enumerate(trail[:: max(1, len(trail) // 12)]):
+            alpha = (index + 1) / max(1, len(trail) // 12 + 1)
+            cv2.circle(frame, (int(x), int(y)), max(2, int(5 * alpha)), (0, 120, 255), -1)
+
     if point is not None:
         x, y = point
         x1, y1, x2, y2 = crop_bounds(point, frame.shape[1], frame.shape[0], crop_size)
@@ -176,6 +185,7 @@ def run(args: argparse.Namespace) -> int:
     landmark_index = TOE_LANDMARKS[args.side]
     prev_gray = None
     point = None
+    trail: deque[tuple[float, float]] = deque(maxlen=args.trail_length)
     source = "none"
     start_time = time.monotonic()
     frame_idx = 0
@@ -200,6 +210,7 @@ def run(args: argparse.Namespace) -> int:
                     tracked = track_toe(prev_gray, gray, point, args.crop_size) # type: ignore
                     if tracked is not None:
                         point = tracked
+                        trail.append(point)
                         source = "track"
                     else:
                         needs_pose = True
@@ -215,9 +226,11 @@ def run(args: argparse.Namespace) -> int:
                     )
                     if detected is not None:
                         point = detected
+                        trail.append(point)
                         source = "pose"
                     else:
                         point = None
+                        trail.clear()
                         source = "none"
 
                 if writer is not None:
@@ -226,7 +239,7 @@ def run(args: argparse.Namespace) -> int:
                     else:
                         writer.writerow([frame_idx, f"{point[0]:.6f}", f"{point[1]:.6f}", source])
 
-                draw_overlay(frame, point, args.crop_size, delegate, source)
+                draw_overlay(frame, point, list(trail), args.crop_size, delegate, source)
                 preview = cv2.resize(
                     frame,
                     (preview_width, preview_height),
@@ -261,6 +274,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size")
     parser.add_argument("--detect-every", type=int, default=15, help="run YOLO Pose every N frames")
     parser.add_argument("--crop-size", type=int, default=160, help="tracking crop size around the toe in pixels")
+    parser.add_argument("--trail-length", type=int, default=90, help="number of recent points to display as a trajectory")
     parser.add_argument("--csv", help="optional CSV output path")
     args = parser.parse_args(argv)
     if args.detect_every < 1:
@@ -271,6 +285,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--confidence must be between 0 and 1")
     if args.imgsz < 32:
         parser.error("--imgsz must be >= 32")
+    if args.trail_length < 0:
+        parser.error("--trail-length must be >= 0")
     if args.cpu:
         args.device = "cpu"
     return args
