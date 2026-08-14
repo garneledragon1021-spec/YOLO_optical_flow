@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #toe_live.py
-"""RTMPose WholeBodyでつま先を検出し、光学フローで追跡するプログラム。"""
+"""RTMPose BodyWithFeetでつま先を検出し、光学フローで追跡するプログラム。"""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ from pathlib import Path
 try:
     import cv2
     import numpy as np
-    from rtmlib import Wholebody
+    from rtmlib import BodyWithFeet
 except ModuleNotFoundError as exc:
     print("依存関係が不足しています。次のコマンドで環境を整えてから再実行してください。", file=sys.stderr)
     print("  .\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt", file=sys.stderr)
     raise SystemExit(1) from exc
 
-# COCO-WholeBodyの足キーポイント。body(17点)の後に左右の足(各3点)が続く。
+# Halpe26の足キーポイント。20/21が左右の足の親指。
 TOE_LANDMARKS = {
-    "left": 17,   # left_big_toe
-    "right": 20,  # right_big_toe
+    "left": 20,   # left_big_toe
+    "right": 21,  # right_big_toe
 }
 
 
@@ -37,14 +37,14 @@ def compute_preview_shape(frame_shape: tuple[int, int], max_width: int = 960, ma
 
 
 def detect_toe(
-    model: Wholebody,
+    model: BodyWithFeet,
     frame: np.ndarray,
     landmark_index: int,
     confidence: float,
     imgsz: int,
     device: str | None = None,
 ) -> tuple[float, float] | None:
-    """RTMPose/RTMW WholeBodyの133点出力から指定側のつま先を取得する。"""
+    """RTMPose BodyWithFeetのHalpe26点出力から指定側のつま先を取得する。"""
     keypoints, scores = model(frame)
     xy = np.asarray(keypoints, dtype=float)
     conf_np = np.asarray(scores, dtype=float)
@@ -166,13 +166,13 @@ def run(args: argparse.Namespace) -> int:
         writer = csv.writer(csv_file)
         writer.writerow(["frame", "x", "y", "source"])
 
-    model = Wholebody(
+    model = BodyWithFeet(
         mode=args.rtmpose_mode,
         backend=args.backend,
         device=args.device,
         to_openpose=False,
     )
-    delegate = f"RTMPose WholeBody ({args.rtmpose_mode}, {args.backend}, {args.device})"
+    delegate = f"RTMPose BodyWithFeet ({args.rtmpose_mode}, {args.backend}, {args.device})"
     landmark_index = TOE_LANDMARKS[args.side]
     prev_gray = None
     point = None
@@ -254,7 +254,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Realtime RTMPose wholebody toe tracker")
+    parser = argparse.ArgumentParser(description="Realtime RTMPose BodyWithFeet toe tracker")
     parser.add_argument("--video", help="video file path. If omitted, the camera is used.")
     parser.add_argument("--camera", type=int, default=0, help="camera index when --video is omitted")
     parser.add_argument("--side", choices=sorted(TOE_LANDMARKS), default="left", help="toe landmark to track")
@@ -270,7 +270,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--rtmpose-mode",
         choices=["performance", "balanced", "lightweight"],
         default="lightweight",
-        help="WholeBodyモデル。初回実行時に公式ONNXモデルを自動取得する",
+        help="BodyWithFeetモデル。初回実行時に公式ONNXモデルを自動取得する",
     )
     parser.add_argument("--confidence", type=float, default=0.35, help="keypoint/person confidence threshold")
     parser.add_argument("--imgsz", type=int, default=640, help="互換用オプション（RTMPoseではモデル設定を使用）")

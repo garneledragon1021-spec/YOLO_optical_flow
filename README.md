@@ -1,6 +1,6 @@
-# RTMPose WholeBody + Optical Flow サンプル
+# RTMPose BodyWithFeet + Optical Flow サンプル
 
-`rtmlib`のRTMPose WholeBodyとOpenCVを使って、つま先の検出、追跡、座標CSV化、角速度計算、注釈動画作成を行うスクリプト群です。RTMPoseモデルは初回実行時に自動でダウンロードされます。
+`rtmlib`のRTMPose BodyWithFeetとOpenCVを使って、つま先の検出、追跡、座標CSV化、角速度計算、注釈動画作成を行うスクリプト群です。RTMPoseモデルは初回実行時に自動でダウンロードされます。
 
 前提:
 - Windows / macOS / Linux
@@ -15,8 +15,8 @@
 | ファイル | 概要 |
 | --- | --- |
 | `toe_mp.py` | 動画の全フレームを MediaPipe Pose で処理し、左足先ランドマークの `x`, `y` 座標を `results/<動画名>_toe_mp.csv` へ保存します。`toe_flow.py` との比較用の基準データに使えます。 |
-| `toe_live.py` | カメラまたは動画上で左右どちらかのつま先をリアルタイム追跡します。RTMPose WholeBodyは一定間隔だけ実行し、間のフレームは小さいクロップ内のオプティカルフローで追跡します。 |
-| `toe_flow.py` | 動画ファイルを対象に、つま先座標をRTMPose WholeBodyとLucas-Kanadeオプティカルフローで追跡します。生座標とSavitzky-Golayフィルター後座標をCSVに出力し、必要なら注釈付きMP4も作成します。 |
+| `toe_live.py` | カメラまたは動画上で左右どちらかのつま先をリアルタイム追跡します。RTMPose BodyWithFeetは一定間隔だけ実行し、間のフレームは小さいクロップ内のオプティカルフローで追跡します。 |
+| `toe_flow.py` | 動画ファイルを対象に、つま先座標をRTMPose BodyWithFeetとLucas-Kanadeオプティカルフローで追跡します。生座標とSavitzky-Golayフィルター後座標をCSVに出力し、必要なら注釈付きMP4も作成します。 |
 | `trajectory_angle.py` | `frame`, `x`, `y` 系の座標 CSV から、軌跡の進行方向角と角速度を計算して新しい CSV を作成します。`--fps` を指定すると秒単位の角速度も出力します。 |
 | `overlay_video.py` | フィルター後座標 CSV を元動画へ重ね、BB 中心まわりの角速度に応じて軌跡の色を変えた MP4 を書き出します。元動画・CSV・BB 中心は GUI または引数で指定できます。 |
 | `foot_flow.py` | 足首・踵・つま先から作った足部 ROI 内の複数特徴点を疎なオプティカルフローで追跡し、BB 中心まわりの角速度中央値を `deg/frame`, `deg/s`, `rpm` として出力します。 |
@@ -76,7 +76,7 @@ python3 toe_live.py --side left
 python3 toe_live.py --video /path/to/video.mov --side left --detect-every 30
 ```
 
-`toe_live.py` はRTMPose WholeBodyを毎フレーム実行せず、一定間隔だけ全身検出して、その間はつま先周辺の小さいクロップをOpenCVのオプティカルフローで追跡します。`--detect-every`を大きくするとRTMPoseの実行回数が減り、`--crop-size`で追跡範囲を調整できます。
+`toe_live.py` はRTMPose BodyWithFeetを毎フレーム実行せず、一定間隔だけ検出して、その間はつま先周辺の小さいクロップをOpenCVのオプティカルフローで追跡します。`--detect-every`を大きくするとRTMPoseの実行回数が減り、`--crop-size`で追跡範囲を調整できます。
 
 `toe_flow.py` で動画処理する場合:
 
@@ -84,7 +84,7 @@ python3 toe_live.py --video /path/to/video.mov --side left --detect-every 30
 python3 toe_flow.py --video /path/to/video.mov --side left --detect-every 30 --write-video
 ```
 
-`toe_mp.py` は従来のMediaPipe版です。`toe_flow.py` はRTMPose WholeBodyを一定間隔だけ実行し、その間をオプティカルフローで追跡します。
+`toe_mp.py` は従来のMediaPipe版です。`toe_flow.py` はRTMPose BodyWithFeetを一定間隔だけ実行し、その間をオプティカルフローで追跡します。
 
 出力CSVにはフィルタ前の座標 `x`, `y` と、Savitzky-Golayフィルタ後の座標
 `x_savgol`, `y_savgol` が格納されます。既定値は窓幅11、多項式次数2です。

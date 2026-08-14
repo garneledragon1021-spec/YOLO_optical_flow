@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RTMPose WholeBodyとLucas-Kanade法で動画のつま先を追跡する。"""
+"""RTMPose BodyWithFeetとLucas-Kanade法で動画のつま先を追跡する。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 try:
     import cv2
     import numpy as np
-    from rtmlib import Wholebody
+    from rtmlib import BodyWithFeet
     from scipy.signal import savgol_filter
 except ModuleNotFoundError as exc:
     print("依存関係が不足しています。次のコマンドで環境を整えてから再実行してください。", file=sys.stderr)
@@ -23,25 +23,25 @@ from video_io import make_video_writer
 
 RESULTS_DIR = Path("results")
 
-# COCO-WholeBodyのキーポイント番号。
-# body: 0-16、足: 17-22（左3点、右3点）
+# Halpe26のキーポイント番号。
+# 13/14が左右膝、15/16が左右足首、20/21が左右の親指。
 TOE_LANDMARKS = {
-    "left": 17,   # left_big_toe
-    "right": 20,  # right_big_toe
+    "left": 20,   # left_big_toe
+    "right": 21,  # right_big_toe
 }
 
 POSE_SEGMENT_LANDMARKS = {
-    "left": (13, 15, 17),   # left knee, left ankle, left big toe
-    "right": (14, 16, 20),  # right knee, right ankle, right big toe
+    "left": (13, 15, 20),   # left knee, left ankle, left big toe
+    "right": (14, 16, 21),  # right knee, right ankle, right big toe
 }
 
 
 def infer_keypoints(
-    model: Wholebody,
+    model: BodyWithFeet,
     frame: np.ndarray,
     pose_scale: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """RTMPoseを実行し、元画像座標系のキーポイントとスコアを返す。"""
+    """RTMPose BodyWithFeetを実行し、元画像座標系のキーポイントを返す。"""
     if pose_scale != 1.0:
         pose_frame = cv2.resize(
             frame,
@@ -62,7 +62,7 @@ def infer_keypoints(
 
 
 def detect_toe(
-    model: Wholebody,
+    model: BodyWithFeet,
     frame: np.ndarray,
     landmark_index: int,
     confidence: float,
@@ -87,7 +87,7 @@ def detect_toe(
 
 
 def detect_pose_leg_points(
-    model: Wholebody,
+    model: BodyWithFeet,
     frame: np.ndarray,
     side: str,
     pose_scale: float,
@@ -364,21 +364,21 @@ def write_results_csv(
             ])
 
 
-def create_model(args: argparse.Namespace) -> tuple[Wholebody, str]:
-    model = Wholebody(
+def create_model(args: argparse.Namespace) -> tuple[BodyWithFeet, str]:
+    model = BodyWithFeet(
         mode=args.rtmpose_mode,
         backend=args.backend,
         device=args.device,
         to_openpose=False,
     )
-    delegate = f"RTMPose WholeBody ({args.rtmpose_mode}, {args.backend}, {args.device})"
+    delegate = f"RTMPose BodyWithFeet ({args.rtmpose_mode}, {args.backend}, {args.device})"
     return model, delegate
 
 
 def process_video(
     args: argparse.Namespace,
     video_path: str,
-    model: Wholebody,
+    model: BodyWithFeet,
     delegate: str,
 ) -> None:
     cap = cv2.VideoCapture(video_path)
@@ -485,7 +485,7 @@ def process_video(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Process videos with RTMPose WholeBody toe flow")
+    parser = argparse.ArgumentParser(description="Process videos with RTMPose BodyWithFeet toe flow")
     parser.add_argument("--check", action="store_true", help="initialize RTMPose and exit")
     parser.add_argument(
         "--video",
@@ -505,7 +505,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--rtmpose-mode",
         choices=["performance", "balanced", "lightweight"],
         default="lightweight",
-        help="WholeBody model preset; models are downloaded on first run",
+        help="BodyWithFeet model preset; models are downloaded on first run",
     )
     parser.add_argument("--confidence", type=float, default=0.35, help="keypoint confidence threshold")
     parser.add_argument("--detect-every", type=int, default=30, help="run RTMPose every N frames")
@@ -546,7 +546,7 @@ def main(argv: list[str]) -> int:
     model, delegate = create_model(args)
     if args.check:
         print(f"delegate: {delegate}")
-        print("RTMPose WholeBody initialization: OK")
+        print("RTMPose BodyWithFeet initialization: OK")
         return 0
 
     videos = args.video if args.video else select_videos()
